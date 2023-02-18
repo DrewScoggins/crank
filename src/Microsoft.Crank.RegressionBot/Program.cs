@@ -14,6 +14,9 @@ using System.Text;
 using System.Threading.Tasks;
 using Fluid;
 using Fluid.Values;
+using Kusto.Data;
+using Kusto.Data.Common;
+using Kusto.Data.Net.Client;
 using Manatee.Json;
 using Manatee.Json.Schema;
 using MessagePack;
@@ -154,7 +157,7 @@ namespace Microsoft.Crank.RegressionBot
 
             // Load configuration files
 
-            var sources = new List<Source>();
+            var sources = new List<ISource>();
             var templates = new Dictionary<string, string>();
 
             foreach (var configurationFilenameOrUrl in options.Config)
@@ -298,7 +301,7 @@ namespace Microsoft.Crank.RegressionBot
                 body = AddOwners(body, regressions);
 
                 body += regressionBlock;
-
+                body = body.Replace("        |", " |");
                 if (body.Length > 65536)
                 {
                     throw new Exception($"Body too long ({body.Length} > 65536 chars)");
@@ -511,59 +514,9 @@ namespace Microsoft.Crank.RegressionBot
         ///   - Calculates the std deviation
         ///   - Look for 2 consecutive deviations
         /// </summary>
-        private static async IAsyncEnumerable<Regression> FindRegression(Source source)
+        private static async IAsyncEnumerable<Regression> FindRegression(ISource source)
         {
-            if (source.Regressions == null)
-            {
-                yield break;
-            }
-
-            if (!source.Table.All(char.IsLetterOrDigit))
-            {
-                Console.Write("Invalid table name should only contain alphanumeric characters.");
-
-                yield break;
-            }
-
-            var loadStartDateTimeUtc = DateTime.UtcNow.AddDays(0 - source.DaysToLoad);
-            var detectionMaxDateTimeUtc = DateTime.UtcNow.AddDays(0 - source.DaysToSkip);
-            
-            var allResults = new List<BenchmarksResult>();
-
-            // Load latest records
-
-            Console.Write("Loading records... ");
-
-            using (var connection = new SqlConnection(_options.ConnectionString))
-            {
-                using (var command = new SqlCommand(string.Format(Queries.Latest, source.Table), connection))
-                {
-                    command.Parameters.AddWithValue("@startDate", loadStartDateTimeUtc);
-                    
-                    await connection.OpenAsync();
-
-                    var reader = await command.ExecuteReaderAsync();
-
-                    while (await reader.ReadAsync())
-                    {
-                        var result = new BenchmarksResult
-                        {
-                            Id = Convert.ToInt32(reader["Id"]),
-                            Excluded = reader["Excluded"] as bool? ?? false, // Handle DBNull values
-                            DateTimeUtc = (DateTimeOffset)reader["DateTimeUtc"],
-                            Session = Convert.ToString(reader["Session"]),
-                            Scenario = Convert.ToString(reader["Scenario"]),
-                            Description = Convert.ToString(reader["Description"]),
-                            Document = Convert.ToString(reader["Document"]),
-                        };
-
-                        if (!result.Excluded)
-                        {
-                            allResults.Add(result);
-                        }                        
-                    }
-                }
-            }
+            var allResults = await source.GetData(_options);
 
             Console.WriteLine($"{allResults.Count} found");
             
@@ -651,7 +604,7 @@ namespace Microsoft.Crank.RegressionBot
                     for (var i = 0; i < resultSet.Length - 5; i++)
                     {
                         // Skip the measurement if it's too recent
-                        if (resultSet[i].Result.DateTimeUtc >= detectionMaxDateTimeUtc)
+                        if (resultSet[i].Result.DateTimeUtc >= DateTime.UtcNow.AddDays(0 - source.DaysToSkip))
                         {
                             continue;
                         }
@@ -884,7 +837,7 @@ namespace Microsoft.Crank.RegressionBot
 
                     // Calculate average time between runs and standard deviation
 
-                    for (var i = 0; i < values.Length - source.StdevCount; i++)
+                    for (var i = 0; i < values.Length - source.StdevCount - 1; i++)
                     {
                         var stdevs = new List<long>();
 
@@ -988,7 +941,7 @@ namespace Microsoft.Crank.RegressionBot
         /// <summary>
         /// Returns the issues from the past
         /// </summary>
-        private static async Task<IReadOnlyList<Issue>> GetRecentIssues(Source source)
+        private static async Task<IReadOnlyList<Issue>> GetRecentIssues(ISource source)
         {
             if (_recentIssues != null)
             {
@@ -1014,7 +967,7 @@ namespace Microsoft.Crank.RegressionBot
         /// <returns>
         /// The remaining issues that haven't been reported yet.
         /// </returns>
-        private static async Task<IEnumerable<Regression>> UpdateIssues(IEnumerable<Regression> regressions, Source source, string template)
+        private static async Task<IEnumerable<Regression>> UpdateIssues(IEnumerable<Regression> regressions, ISource source, string template)
         {
             if (!regressions.Any())
             {

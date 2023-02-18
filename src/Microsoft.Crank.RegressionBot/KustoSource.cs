@@ -10,10 +10,14 @@ using System.Threading.Tasks;
 using Microsoft.Crank.Models;
 using Microsoft.Crank.RegressionBot.Models;
 using Microsoft.Data.SqlClient;
+using Kusto.Data;
+using Kusto.Data.Common;
+using Kusto.Data.Net.Client;
+using Newtonsoft.Json;
 
 namespace Microsoft.Crank.RegressionBot
 {
-    public class Source : ISource
+    public class KustoSource : ISource
     {
         // The name of the source
         public string Name { get; set;}
@@ -112,36 +116,52 @@ namespace Microsoft.Crank.RegressionBot
 
             Console.Write("Loading records... ");
 
-            using (var connection = new SqlConnection(options.ConnectionString))
+            var db = "https://dotnetperf.westus.kusto.windows.net";
+            var kcsb = new KustoConnectionStringBuilder(db, "PerformanceData").WithAadUserPromptAuthentication();
+            var queryProvider = KustoClientFactory.CreateCslQueryProvider(kcsb);
+            var clientRequestProperties = new ClientRequestProperties() { ClientRequestId = Guid.NewGuid().ToString() };
+            var query = @$"Measurements
+| where BuildTimeStamp > ago({DaysToLoad}d)
+| where BuildBranch == ""refs/heads/main""
+| where BuildArchitecture == ""x64""
+| where TestCounterName == ""Duration of single invocation""
+| where RunQueue == ""Windows.10.Amd64.19H1.Tiger.Perf""
+| where RunConfigurationsRunKind == ""micro""
+| where RunConfigurations[""CompilationMode""] == ""Tiered""
+| where RunConfigurationsPgoType == """"
+| project BuildName, TestCounterResultAverage, TestName, BuildTimeStamp
+| order by BuildTimeStamp asc";
+
+            var reader = queryProvider.ExecuteQuery(query, clientRequestProperties);
+            Dictionary<string, List<double>> resultsData = new Dictionary<string, List<double>>();
+            int count = 0;
+            while (reader.Read())
             {
-                using (var command = new SqlCommand(string.Format(Queries.Latest, Table), connection))
+                var obj = new
                 {
-                    command.Parameters.AddWithValue("@startDate", loadStartDateTimeUtc);
-
-                    await connection.OpenAsync();
-
-                    var reader = await command.ExecuteReaderAsync();
-
-                    while (await reader.ReadAsync())
+                    results = new[]
                     {
-                        var result = new BenchmarksResult
+                        new
                         {
-                            Id = Convert.ToInt32(reader["Id"]),
-                            Excluded = reader["Excluded"] as bool? ?? false, // Handle DBNull values
-                            DateTimeUtc = (DateTimeOffset)reader["DateTimeUtc"],
-                            Session = Convert.ToString(reader["Session"]),
-                            Scenario = Convert.ToString(reader["Scenario"]),
-                            Description = Convert.ToString(reader["Description"]),
-                            Document = Convert.ToString(reader["Document"]),
-                        };
-
-                        if (!result.Excluded)
-                        {
-                            allResults.Add(result);
+                            result = reader.GetDouble(1)
                         }
                     }
-                }
+                };
+                var testName = reader.GetString(2);
+                var result = new BenchmarksResult
+                {
+                    Id = count,
+                    Excluded = false, // Handle DBNull values
+                    DateTimeUtc = (DateTime)reader["BuildTimeStamp"],
+                    Session = Convert.ToString(reader["BuildName"]),
+                    Scenario = Convert.ToString(reader["TestName"]),
+                    Description = Convert.ToString(reader["TestName"]),
+                    Document = JsonConvert.SerializeObject(obj),
+                };
+                allResults.Add(result);
+                count++;
             }
+
             return allResults;
         }
     }

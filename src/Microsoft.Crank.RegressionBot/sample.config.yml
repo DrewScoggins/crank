@@ -14,35 +14,34 @@ sources:
       - exclude: ulib
     regressions:
       probes: 
-        - path: jobs.load.results['wrk/rps/mean']
-        - path: jobs.load.results['bombardier/rps/mean']
+        - path: results[0].result
       labels: 
         - Perf
         - perf-regression
       owners:
-        - sebastienros
+        - DrewScoggins
       template: rps
       healthCheck: true
 
-  - name: EFCoreCrank
-    table: EFCoreCrank
-    daysToLoad: 30
-    stdevCount: 7
-    daysToSkip: 4
-    rules:
-      - include: AddDataVariations.Add
-        labels: 
-          - area-efcore
-        owners:
-          - sebastienros
-    regressions:
-      labels: 
-        - Perf
-        - perf-regression
-      owners:
-        - sebastienros
-      template: rps
-      healthCheck: true
+  #- name: EFCoreCrank
+  #  table: EFCoreCrank
+  #  daysToLoad: 30
+  #  stdevCount: 7
+  #  daysToSkip: 4
+  #  rules:
+  #    - include: AddDataVariations.Add
+  #      labels: 
+  #        - area-efcore
+  #      owners:
+  #        - sebastienros
+  #  regressions:
+  #    labels: 
+  #      - Perf
+  #      - perf-regression
+  #    owners:
+  #      - sebastienros
+  #    template: rps
+  #    healthCheck: true
 
 templates:
   rps: "A performance regression has been detected for the following scenarios: \n\n
@@ -51,10 +50,10 @@ templates:
       {% for regression in Regressions %}
       {% assign r = regression.CurrentResult %}
       {% assign p = regression.PreviousResult %}
-      {% assign rps = r.Data.jobs.load.results['wrk/rps/mean'] %}
-      {% assign prevRps = p.Data.jobs.load.results['wrk/rps/mean'] %}
-      {% assign change = regression.Change | divided_by: prevRps | times: 100 | round: 2 %}
+      {% assign result = r.Data.results[0].result %}
+      {% assign prevResult = p.Data.results[0].result %}
+      {% assign change = regression.Change | divided_by: prevResult | times: 100 | round: 2 %}
       {% assign deviation = regression.Change | divided_by: regression.StandardDeviation | round: 2 %}
-      | {{r.Scenario}} {% if regression.HasRecovered %}[Fixed]{% endif %} | {{r.Description}} | {{r.DateTimeUtc | format_date: 'G'}} | {{prevRps | format_number: 'N0' }} | {{rps | format_number: 'N0' }} | {{change format_number: 'N2'}} % ({{regression.Change | format_number: 'N0'}}) | {{deviation | format_number: 'N2'}} σ | {{ regression.StandardDeviation | format_number: 'N2'}} | \n
+      | {{r.Scenario}} {% if regression.HasRecovered %}[Fixed]{% endif %} | {{r.Description}} | {{r.DateTimeUtc | format_date: 'G'}} | {{prevResult | format_number: 'N0' }} | {{result | format_number: 'N0' }} | {{change | format_number: 'N2'}} % ({{regression.Change | format_number: 'N0'}}) | {{deviation | format_number: 'N2'}} σ | {{ regression.StandardDeviation | format_number: 'N2'}} | \n
       {% endfor %}
       "

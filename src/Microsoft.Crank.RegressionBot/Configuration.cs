@@ -9,6 +9,12 @@ namespace Microsoft.Crank.RegressionBot
     public class Configuration
     {
         public Dictionary<string, string> Templates { get; set; } = new Dictionary<string, string>();
-        public List<Source> Sources { get; set; } = new List<Source>();
+        public List<ISource> Sources { get; set; } = new List<ISource>();
+
+        public Configuration(Dictionary<string, string> templates, List<KustoSource> sources)
+        {
+            Templates = templates;
+            Sources.AddRange(sources);
+        }
     }
 }
