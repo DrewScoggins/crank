@@ -745,12 +745,10 @@ namespace Microsoft.Crank.RegressionBot
                             // recovered
                             // - if the delta is inside the threshold limits
                             // - the delta is outside the threshold limits but in the opposite sign
-                            
+                            var hasRecovered = false;
                             for (var j = i + 5; j < resultSet.Length; j++)
                             {
                                 var nextValue = values[j] - values[i];
-
-                                var hasRecovered = false;
 
                                 // It has recovered if the difference between the first measurement and the current one 
                                 // are within the threashold boundaries, or if the value is better (opposite sign).
@@ -789,9 +787,25 @@ namespace Microsoft.Crank.RegressionBot
                                 }
                             }
 
-                            regression.ComputeChanges();
+                            if (hasRegressed && !hasRecovered)
+                            {
+                                ChangepointDifference cpd = new ChangepointDifference();
+                                var analysis = cpd.DetectDifference(values);
+                                if (analysis.change == DifferenceType.Regression)
+                                {
+                                    regression.ComputeChanges();
 
-                            yield return regression;
+                                    yield return regression;
+                                }
+                                else
+                                {
+                                    break;
+                                }
+                            }
+
+                            //regression.ComputeChanges();
+
+                            //yield return regression;
                         }
                     }
                 }
