@@ -3390,7 +3390,7 @@ namespace Microsoft.Crank.Controller
             var rcsb = new RelayConnectionStringBuilder(connectionString);
             TokenProvider tokenProvider = null;
             AccessToken token = default;
-            if (false)//_certBasedAuth.HasValue())
+            if (_certBasedAuth.HasValue())
             {
                 ClientCertificateCredential ccc = null;
                 X509Store store = null;
