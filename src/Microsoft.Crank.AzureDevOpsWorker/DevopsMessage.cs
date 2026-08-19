@@ -252,7 +252,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
             }
         }
 
-        public async Task<Records> GetRecordsAsync()
+        public async Task<Records> GetRecordsAsync(bool forceRefresh = false)
         {
             // NOTE: There is no API that allows to retrieve a single task details. Only the whole list.
             // So we cache the results to prevent rate limiting.
@@ -262,6 +262,11 @@ namespace Microsoft.Crank.AzureDevOpsWorker
             try
             {
                 // The application is single-threaded
+
+                if (forceRefresh)
+                {
+                    _memoryCache.Remove(getRecordsUrl);
+                }
 
                 var records = await _memoryCache.GetOrCreateAsync(getRecordsUrl, async entry =>
                 {

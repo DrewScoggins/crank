@@ -26,6 +26,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
         public string Name { get; set; }
         public string[] Args { get; set; }
         public int Retries { get; set; } = 0;
+        public PostProcessPayload PostProcess { get; set; }
 
         // A JavaScript condition that must evaluate to true. "job" 
         public string Condition { get; set; }
@@ -64,7 +65,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
             }
             catch (Exception e)
             {
-                throw new Exception($"Error while parsing message body: {Convert.ToHexString(data)}", e);
+                throw new Exception($"Error while parsing message body ({data?.Length ?? 0} bytes).", e);
             }
         }
     }
