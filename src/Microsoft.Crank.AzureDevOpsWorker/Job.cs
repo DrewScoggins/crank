@@ -25,7 +25,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
         private ConcurrentQueue<string> _standardError = new ConcurrentQueue<string>();
 
         public StringBuilder OutputBuilder { get; private set; } = new StringBuilder();
-        
+
         public StringBuilder ErrorBuilder { get; private set; } = new StringBuilder();
 
         public Action<string> OnStandardOutput { get; set; }
@@ -34,7 +34,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
 
         public DateTime StartTimeUtc { get; private set; }
 
-        public Job (string applicationPath, string arguments, string workingDirectory = null)
+        public Job(string applicationPath, string arguments, string workingDirectory = null)
         {
             _process = new Process()
             {

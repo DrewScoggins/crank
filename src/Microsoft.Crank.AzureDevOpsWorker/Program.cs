@@ -192,7 +192,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
                     // Mark the message as completed
                     await args.CompleteMessageAsync(message);
                 }
-                else 
+                else
                 {
                     if (!String.IsNullOrWhiteSpace(jobPayload.Condition))
                     {
@@ -223,7 +223,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
                     var arguments = String.Join(' ', jobPayload.Args);
 
                     Console.WriteLine($"{LogNow} Invoking crank with arguments: {arguments}");
-                    
+
                     if (Verbose)
                     {
                         Console.WriteLine($"{LogNow} Invoking crank with timeout: {jobPayload.Timeout}");
@@ -299,9 +299,9 @@ namespace Microsoft.Crank.AzureDevOpsWorker
 
                     // Mark the message as completed
                     await args.CompleteMessageAsync(message);
-                    
+
                     Console.WriteLine($"{LogNow} Job completed");
-                }                
+                }
             }
             catch (Exception e)
             {
