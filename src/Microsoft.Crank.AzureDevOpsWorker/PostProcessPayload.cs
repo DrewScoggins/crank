@@ -13,6 +13,8 @@ namespace Microsoft.Crank.AzureDevOpsWorker
 
         public string Name { get; set; }
 
+        public bool Enabled { get; set; } = true;
+
         public string[] Args { get; set; } = Array.Empty<string>();
 
         internal string GetSafeDisplayName()

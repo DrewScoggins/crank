@@ -43,15 +43,20 @@ Jobs that need the hook add an optional `postProcess` object:
   "args": ["--json", "crank-results.json"],
   "postProcess": {
     "name": "Result export",
+    "enabled": true,
     "args": ["upload", "--crank-json", "crank-results.json"]
   }
 }
 ```
 
-`name` is used only as a sanitized display name. `args` is passed with
-`ProcessStartInfo.ArgumentList`; it never selects the executable. Payloads
-without `postProcess` retain their existing behavior. A payload that requests
-post-processing fails explicitly when no executable is configured.
+`name` is used only as a sanitized display name. `enabled` is optional and
+defaults to `true`. When it is `false`, the worker logs that the named hook is
+disabled and treats the post-process step as successful without requiring or
+starting an executable or evaluating its arguments and cancellation callback.
+When enabled, `args` is passed with `ProcessStartInfo.ArgumentList`; it never
+selects the executable. Payloads without `postProcess` retain their existing
+behavior. A payload that requests enabled post-processing fails explicitly when
+no executable is configured.
 
 The worker forwards the executable's standard output and standard error to the
 Azure DevOps task log, but does not log its full argument list. The executable

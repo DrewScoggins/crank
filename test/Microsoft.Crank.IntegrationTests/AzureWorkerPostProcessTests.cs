@@ -34,8 +34,24 @@ namespace Microsoft.Crank.IntegrationTests
                 """));
 
             Assert.Equal("Result export", payload.PostProcess.Name);
+            Assert.True(payload.PostProcess.Enabled);
             Assert.Equal(new[] { "upload", "--crank-json", "crank-results.json" }, payload.PostProcess.Args);
             Assert.Null(typeof(PostProcessPayload).GetProperty("Executable"));
+
+            var disabledPayload = JobPayload.Deserialize(Encoding.UTF8.GetBytes(
+                """
+                {
+                  "name": "crank",
+                  "args": [],
+                  "postProcess": {
+                    "name": "Disabled export",
+                    "enabled": false,
+                    "args": []
+                  }
+                }
+                """));
+
+            Assert.False(disabledPayload.PostProcess.Enabled);
 
             var compatiblePayload = JobPayload.Deserialize(Encoding.UTF8.GetBytes(
                 """{"name":"crank","args":["--json","crank-results.json"]}"""));
@@ -152,6 +168,61 @@ namespace Microsoft.Crank.IntegrationTests
             Assert.True(noHookResult.Succeeded);
             Assert.False(failedCrankResult.Succeeded);
             Assert.Equal(0, invocations);
+        }
+
+        [Fact]
+        public async Task DisabledPostProcessSkipsExecutionAndCleansUpSuccessfully()
+        {
+            var workingDirectory = CreateTestDirectory();
+            var attempts = 0;
+            var processStarts = 0;
+            var postProcessNetworkCalls = 0;
+            var logs = new List<string>();
+            var lifecycle = new List<string>();
+
+            var result = await AttemptExecution.RunWithRetriesAsync(
+                retryCount: 2,
+                _ =>
+                {
+                    attempts++;
+
+                    return AttemptExecution.RunWithCleanupAsync(
+                        workingDirectory,
+                        () => AttemptExecution.ApplyPostProcessAsync(
+                            new AttemptResult(succeeded: true),
+                            new PostProcessPayload
+                            {
+                                Name = "Optional export",
+                                Enabled = false,
+                                Args = new[] { "--token", "unused-secret" }
+                            },
+                            () =>
+                            {
+                                processStarts++;
+                                postProcessNetworkCalls++;
+                                return Task.FromResult(new PostProcessResult(PostProcessStatus.Succeeded));
+                            },
+                            log =>
+                            {
+                                logs.Add(log);
+                                lifecycle.Add("disabled-log");
+                                return Task.CompletedTask;
+                            }),
+                        directory =>
+                        {
+                            lifecycle.Add("cleanup");
+                            Directory.Delete(directory, recursive: true);
+                        });
+                },
+                onRetry: null);
+
+            Assert.True(result.Succeeded);
+            Assert.Equal(1, attempts);
+            Assert.Equal(0, processStarts);
+            Assert.Equal(0, postProcessNetworkCalls);
+            Assert.Equal(new[] { "Post-process 'Optional export' is disabled." }, logs);
+            Assert.Equal(new[] { "disabled-log", "cleanup" }, lifecycle);
+            Assert.False(Directory.Exists(workingDirectory));
         }
 
         [Fact]

@@ -25,10 +25,21 @@ namespace Microsoft.Crank.AzureDevOpsWorker
         public static async Task<AttemptResult> ApplyPostProcessAsync(
             AttemptResult crankResult,
             PostProcessPayload postProcess,
-            Func<Task<PostProcessResult>> runPostProcessAsync)
+            Func<Task<PostProcessResult>> runPostProcessAsync,
+            Func<string, Task> writeLogAsync = null)
         {
             if (!crankResult.Succeeded || crankResult.Canceled || postProcess == null)
             {
+                return crankResult;
+            }
+
+            if (!postProcess.Enabled)
+            {
+                if (writeLogAsync != null)
+                {
+                    await writeLogAsync($"Post-process '{postProcess.GetSafeDisplayName()}' is disabled.");
+                }
+
                 return crankResult;
             }
 

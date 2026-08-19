@@ -265,7 +265,8 @@ namespace Microsoft.Crank.AzureDevOpsWorker
                                             workerConfiguration.PostProcessTimeout,
                                             logs => ForwardPostProcessLogsAsync(devopsMessage, logs, taskLogBuilder),
                                             cancellationToken => IsTaskCompletedAsync(devopsMessage),
-                                            args.CancellationToken));
+                                            args.CancellationToken),
+                                        log => ForwardPostProcessLogsAsync(devopsMessage, new[] { log }, taskLogBuilder));
                                 },
                                 TryDeleteDirectory);
                         },
