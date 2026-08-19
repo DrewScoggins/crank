@@ -65,7 +65,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
             }
             catch (Exception e)
             {
-                throw new Exception($"Error while parsing message body ({data?.Length ?? 0} bytes).", e);
+                throw new JobPayloadParseException(data?.Length ?? 0, e.GetType());
             }
         }
     }

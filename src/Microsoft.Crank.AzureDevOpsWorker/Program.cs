@@ -46,6 +46,10 @@ namespace Microsoft.Crank.AzureDevOpsWorker
                 "--post-process-timeout <timespan>",
                 $"Post-process timeout. Defaults to {WorkerConfiguration.PostProcessTimeoutEnvironmentVariable} or {WorkerConfiguration.DefaultPostProcessTimeout}.",
                 CommandOptionType.SingleValue);
+            var maxAutoLockRenewalDurationOption = app.Option(
+                "--max-lock-renewal-duration <timespan>",
+                $"Maximum Service Bus message lock renewal duration. Defaults to {WorkerConfiguration.MaxAutoLockRenewalDurationEnvironmentVariable} or {WorkerConfiguration.DefaultMaxAutoLockRenewalDuration}.",
+                CommandOptionType.SingleValue);
 
             app.OnExecuteAsync(async cancellationToken =>
             {
@@ -61,7 +65,8 @@ namespace Microsoft.Crank.AzureDevOpsWorker
 
                 var workerConfiguration = WorkerConfiguration.Create(
                     postProcessExecutableOption.Value(),
-                    postProcessTimeoutOption.Value());
+                    postProcessTimeoutOption.Value(),
+                    maxAutoLockRenewalDurationOption.Value());
 
                 var queue = queueOption.Value();
 
@@ -125,12 +130,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
                 client = new ServiceBusClient(connectionString);
             }
 
-            var processor = client.CreateProcessor(queue, new ServiceBusProcessorOptions
-            {
-                AutoCompleteMessages = false,
-                MaxConcurrentCalls = 1, // Process one message at a time
-                MaxAutoLockRenewalDuration = TimeSpan.FromHours(1) // Maintaining the lock for as much as a job should run 
-            });
+            var processor = client.CreateProcessor(queue, CreateProcessorOptions(workerConfiguration));
 
             // Whenever a message is available on the queue
             processor.ProcessMessageAsync += args => MessageHandler(args, workerConfiguration);
@@ -145,9 +145,8 @@ namespace Microsoft.Crank.AzureDevOpsWorker
 
         private static async Task MessageHandler(ProcessMessageEventArgs args, WorkerConfiguration workerConfiguration)
         {
-            Console.WriteLine($"{LogNow} Processing message '{args.Message}'");
-
             var message = args.Message;
+            Console.WriteLine($"{LogNow} Processing Service Bus message.");
 
             JobPayload jobPayload;
             DevopsMessage devopsMessage = null;
@@ -215,6 +214,22 @@ namespace Microsoft.Crank.AzureDevOpsWorker
                         {
                             Console.WriteLine($"{LogNow} Could not evaluate condition [{jobPayload.Condition}], ignoring ...");
                         }
+                    }
+
+                    if (!workerConfiguration.HasSufficientLockRenewalDuration(jobPayload, out var requiredLockRenewalDuration))
+                    {
+                        await devopsMessage.SendTaskStartedEventAsync();
+
+                        var lockRenewalFailure =
+                            $"{LogNow} Job requires up to {requiredLockRenewalDuration} of message lock renewal, " +
+                            $"but the worker is configured for {workerConfiguration.MaxAutoLockRenewalDuration}. " +
+                            "Increase --max-lock-renewal-duration; the job will not be started.";
+
+                        Console.WriteLine(lockRenewalFailure);
+                        await devopsMessage.SendTaskLogFeedsAsync(lockRenewalFailure);
+                        await devopsMessage.SendTaskCompletedEventAsync(DevopsMessage.ResultTypes.Failed);
+                        await args.CompleteMessageAsync(message);
+                        return;
                     }
 
                     // Inform AzDo that the job is started
@@ -305,7 +320,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
             }
             catch (Exception e)
             {
-                Console.WriteLine($"{LogNow} Job failed: {e}");
+                Console.WriteLine($"{LogNow} Job failed: {FormatExceptionForLog(e)}");
 
                 Console.WriteLine("Stopping the task and releasing the message...");
 
@@ -328,6 +343,30 @@ namespace Microsoft.Crank.AzureDevOpsWorker
                     Console.WriteLine($"{LogNow} Failed to abandon the message: {f}");
                 }
             }
+        }
+
+        internal static ServiceBusProcessorOptions CreateProcessorOptions(WorkerConfiguration workerConfiguration)
+        {
+            ArgumentNullException.ThrowIfNull(workerConfiguration);
+
+            return new ServiceBusProcessorOptions
+            {
+                AutoCompleteMessages = false,
+                MaxConcurrentCalls = 1,
+                MaxAutoLockRenewalDuration = workerConfiguration.MaxAutoLockRenewalDuration
+            };
+        }
+
+        internal static string FormatExceptionForLog(Exception exception)
+        {
+            ArgumentNullException.ThrowIfNull(exception);
+
+            if (exception is JobPayloadParseException)
+            {
+                return $"{exception.GetType().Name}: {exception.Message}";
+            }
+
+            return exception.ToString();
         }
 
         private static async Task<AttemptResult> RunCrankAsync(

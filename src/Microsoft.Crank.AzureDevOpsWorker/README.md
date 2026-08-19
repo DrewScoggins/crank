@@ -33,6 +33,22 @@ Post-processing has a worker-controlled timeout of 10 minutes by default. Set
 `CRANK_AZDO_POST_PROCESS_TIMEOUT` to a positive .NET `TimeSpan`, for example
 `00:20:00`. The command-line option takes precedence.
 
+The worker renews each Service Bus message lock for up to one day by default.
+Set `--max-lock-renewal-duration <timespan>` or
+`CRANK_AZDO_MAX_LOCK_RENEWAL_DURATION` to change this worker-controlled limit.
+For every payload, the worker calculates the maximum supported execution time
+as:
+
+```text
+(retries + 1) * (job timeout + enabled post-process timeout)
+```
+
+An absent or disabled post-process contributes no post-process timeout, and a
+negative retry count is treated as zero. If the configured lock renewal duration
+is less than the calculated duration, the worker fails and completes the task
+without starting Crank. This prevents message lock expiry from redelivering and
+duplicating a long-running job.
+
 ### Payload contract
 
 Jobs that need the hook add an optional `postProcess` object:

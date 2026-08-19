@@ -63,7 +63,7 @@ namespace Microsoft.Crank.IntegrationTests
         {
             var bytes = Convert.FromHexString(hexPayload);
 
-            Assert.Throws<Exception>(() => JobPayload.Deserialize(bytes));
+            Assert.Throws<JobPayloadParseException>(() => JobPayload.Deserialize(bytes));
         }
 
         [Theory]

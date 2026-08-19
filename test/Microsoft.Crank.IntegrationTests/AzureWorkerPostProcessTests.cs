@@ -66,12 +66,31 @@ namespace Microsoft.Crank.IntegrationTests
             var malformedPayload = Encoding.UTF8.GetBytes(
                 $$"""{"postProcess":{"args":["{{secret}}"]}""");
 
-            var exception = Assert.Throws<Exception>(() => JobPayload.Deserialize(malformedPayload));
+            var exception = Assert.Throws<JobPayloadParseException>(() => JobPayload.Deserialize(malformedPayload));
 
+            Assert.Null(exception.InnerException);
             Assert.DoesNotContain(secret, exception.ToString());
             Assert.DoesNotContain(
                 Convert.ToHexString(Encoding.UTF8.GetBytes(secret)),
                 exception.ToString());
+        }
+
+        [Fact]
+        public void InvalidTimeoutParseFailureAndProgramLogAreSanitized()
+        {
+            const string secret = "PASSWORD=super-secret-invalid-timeout";
+            var payload = Encoding.UTF8.GetBytes(
+                $$"""{"name":"crank","timeout":"{{secret}}","args":[]}""");
+
+            var exception = Assert.Throws<JobPayloadParseException>(() => JobPayload.Deserialize(payload));
+            var programLog = Program.FormatExceptionForLog(exception);
+
+            Assert.Null(exception.InnerException);
+            Assert.Equal(
+                $"JobPayloadParseException: Job payload parsing failed ({payload.Length} bytes, FormatException).",
+                programLog);
+            Assert.DoesNotContain(secret, exception.ToString());
+            Assert.DoesNotContain(secret, programLog);
         }
 
         [Fact]
@@ -80,28 +99,36 @@ namespace Microsoft.Crank.IntegrationTests
             var environment = new Dictionary<string, string>
             {
                 [WorkerConfiguration.PostProcessExecutableEnvironmentVariable] = "environment-exporter",
-                [WorkerConfiguration.PostProcessTimeoutEnvironmentVariable] = "00:00:45"
+                [WorkerConfiguration.PostProcessTimeoutEnvironmentVariable] = "00:00:45",
+                [WorkerConfiguration.MaxAutoLockRenewalDurationEnvironmentVariable] = "02:00:00"
             };
 
             var environmentConfiguration = WorkerConfiguration.Create(
+                null,
                 null,
                 null,
                 name => environment.GetValueOrDefault(name));
 
             Assert.Equal("environment-exporter", environmentConfiguration.PostProcessExecutablePath);
             Assert.Equal(TimeSpan.FromSeconds(45), environmentConfiguration.PostProcessTimeout);
+            Assert.Equal(TimeSpan.FromHours(2), environmentConfiguration.MaxAutoLockRenewalDuration);
 
             var cliConfiguration = WorkerConfiguration.Create(
                 "cli-exporter",
                 "00:00:15",
+                "03:00:00",
                 name => environment.GetValueOrDefault(name));
 
             Assert.Equal("cli-exporter", cliConfiguration.PostProcessExecutablePath);
             Assert.Equal(TimeSpan.FromSeconds(15), cliConfiguration.PostProcessTimeout);
+            Assert.Equal(TimeSpan.FromHours(3), cliConfiguration.MaxAutoLockRenewalDuration);
 
-            var defaultConfiguration = WorkerConfiguration.Create(null, null, _ => null);
+            var defaultConfiguration = WorkerConfiguration.Create(null, null, null, _ => null);
             Assert.Null(defaultConfiguration.PostProcessExecutablePath);
             Assert.Equal(WorkerConfiguration.DefaultPostProcessTimeout, defaultConfiguration.PostProcessTimeout);
+            Assert.Equal(
+                WorkerConfiguration.DefaultMaxAutoLockRenewalDuration,
+                defaultConfiguration.MaxAutoLockRenewalDuration);
         }
 
         [Theory]
@@ -110,7 +137,90 @@ namespace Microsoft.Crank.IntegrationTests
         [InlineData("-00:00:01")]
         public void WorkerConfigurationRejectsInvalidTimeout(string timeout)
         {
-            Assert.Throws<ArgumentException>(() => WorkerConfiguration.Create(null, timeout, _ => null));
+            Assert.Throws<ArgumentException>(() => WorkerConfiguration.Create(null, timeout, null, _ => null));
+        }
+
+        [Theory]
+        [InlineData("not-a-timespan")]
+        [InlineData("00:00:00")]
+        [InlineData("-00:00:01")]
+        public void WorkerConfigurationRejectsInvalidLockRenewalDuration(string duration)
+        {
+            Assert.Throws<ArgumentException>(() => WorkerConfiguration.Create(null, null, duration, _ => null));
+        }
+
+        [Fact]
+        public void LockRenewalDurationAccountsForRetriesAndPostProcessTimeout()
+        {
+            var exactConfiguration = WorkerConfiguration.Create(
+                null,
+                "00:05:00",
+                "01:15:00",
+                _ => null);
+            var insufficientConfiguration = WorkerConfiguration.Create(
+                null,
+                "00:05:00",
+                "01:14:59.9999999",
+                _ => null);
+            var payload = new JobPayload
+            {
+                Timeout = TimeSpan.FromMinutes(20),
+                Retries = 2,
+                PostProcess = new PostProcessPayload()
+            };
+
+            Assert.True(exactConfiguration.HasSufficientLockRenewalDuration(payload, out var requiredDuration));
+            Assert.Equal(TimeSpan.FromMinutes(75), requiredDuration);
+            Assert.False(insufficientConfiguration.HasSufficientLockRenewalDuration(payload, out requiredDuration));
+            Assert.Equal(TimeSpan.FromMinutes(75), requiredDuration);
+            Assert.Equal(
+                TimeSpan.FromMinutes(75),
+                Program.CreateProcessorOptions(exactConfiguration).MaxAutoLockRenewalDuration);
+        }
+
+        [Fact]
+        public void LockRenewalDurationPreservesJobsWithoutEnabledPostProcess()
+        {
+            var configuration = WorkerConfiguration.Create(
+                null,
+                "00:10:00",
+                "00:30:00",
+                _ => null);
+            var payload = new JobPayload
+            {
+                Timeout = TimeSpan.FromMinutes(10),
+                Retries = 2
+            };
+
+            Assert.True(configuration.HasSufficientLockRenewalDuration(payload, out var requiredDuration));
+            Assert.Equal(TimeSpan.FromMinutes(30), requiredDuration);
+
+            payload.PostProcess = new PostProcessPayload { Enabled = false };
+            Assert.True(configuration.HasSufficientLockRenewalDuration(payload, out requiredDuration));
+            Assert.Equal(TimeSpan.FromMinutes(30), requiredDuration);
+
+            payload.PostProcess.Enabled = true;
+            Assert.False(configuration.HasSufficientLockRenewalDuration(payload, out requiredDuration));
+            Assert.Equal(TimeSpan.FromMinutes(60), requiredDuration);
+
+            payload.PostProcess = null;
+            payload.Retries = -1;
+            Assert.True(configuration.HasSufficientLockRenewalDuration(payload, out requiredDuration));
+            Assert.Equal(TimeSpan.FromMinutes(10), requiredDuration);
+        }
+
+        [Fact]
+        public void LockRenewalDurationOverflowFailsSafely()
+        {
+            var configuration = WorkerConfiguration.Create(null, null, null, _ => null);
+            var payload = new JobPayload
+            {
+                Timeout = TimeSpan.MaxValue,
+                Retries = 1
+            };
+
+            Assert.False(configuration.HasSufficientLockRenewalDuration(payload, out var requiredDuration));
+            Assert.Equal(TimeSpan.MaxValue, requiredDuration);
         }
 
         [Fact]
