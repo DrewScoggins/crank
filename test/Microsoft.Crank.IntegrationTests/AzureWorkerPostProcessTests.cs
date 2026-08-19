@@ -152,15 +152,20 @@ namespace Microsoft.Crank.IntegrationTests
         [Fact]
         public void LockRenewalDurationAccountsForRetriesAndPostProcessTimeout()
         {
-            var exactConfiguration = WorkerConfiguration.Create(
+            var summedTimeoutConfiguration = WorkerConfiguration.Create(
                 null,
                 "00:05:00",
                 "01:15:00",
                 _ => null);
-            var insufficientConfiguration = WorkerConfiguration.Create(
+            var boundaryConfiguration = WorkerConfiguration.Create(
                 null,
                 "00:05:00",
-                "01:14:59.9999999",
+                "01:20:00",
+                _ => null);
+            var belowBoundaryConfiguration = WorkerConfiguration.Create(
+                null,
+                "00:05:00",
+                "01:19:59.9999999",
                 _ => null);
             var payload = new JobPayload
             {
@@ -169,13 +174,16 @@ namespace Microsoft.Crank.IntegrationTests
                 PostProcess = new PostProcessPayload()
             };
 
-            Assert.True(exactConfiguration.HasSufficientLockRenewalDuration(payload, out var requiredDuration));
-            Assert.Equal(TimeSpan.FromMinutes(75), requiredDuration);
-            Assert.False(insufficientConfiguration.HasSufficientLockRenewalDuration(payload, out requiredDuration));
-            Assert.Equal(TimeSpan.FromMinutes(75), requiredDuration);
+            Assert.Equal(TimeSpan.FromMinutes(5), WorkerConfiguration.MessageLockRenewalSafetyMargin);
+            Assert.False(summedTimeoutConfiguration.HasSufficientLockRenewalDuration(payload, out var requiredDuration));
+            Assert.Equal(TimeSpan.FromMinutes(80), requiredDuration);
+            Assert.True(boundaryConfiguration.HasSufficientLockRenewalDuration(payload, out requiredDuration));
+            Assert.Equal(TimeSpan.FromMinutes(80), requiredDuration);
+            Assert.False(belowBoundaryConfiguration.HasSufficientLockRenewalDuration(payload, out requiredDuration));
+            Assert.Equal(TimeSpan.FromMinutes(80), requiredDuration);
             Assert.Equal(
-                TimeSpan.FromMinutes(75),
-                Program.CreateProcessorOptions(exactConfiguration).MaxAutoLockRenewalDuration);
+                TimeSpan.FromMinutes(80),
+                Program.CreateProcessorOptions(boundaryConfiguration).MaxAutoLockRenewalDuration);
         }
 
         [Fact]
@@ -184,7 +192,7 @@ namespace Microsoft.Crank.IntegrationTests
             var configuration = WorkerConfiguration.Create(
                 null,
                 "00:10:00",
-                "00:30:00",
+                "00:35:00",
                 _ => null);
             var payload = new JobPayload
             {
@@ -193,20 +201,20 @@ namespace Microsoft.Crank.IntegrationTests
             };
 
             Assert.True(configuration.HasSufficientLockRenewalDuration(payload, out var requiredDuration));
-            Assert.Equal(TimeSpan.FromMinutes(30), requiredDuration);
+            Assert.Equal(TimeSpan.FromMinutes(35), requiredDuration);
 
             payload.PostProcess = new PostProcessPayload { Enabled = false };
             Assert.True(configuration.HasSufficientLockRenewalDuration(payload, out requiredDuration));
-            Assert.Equal(TimeSpan.FromMinutes(30), requiredDuration);
+            Assert.Equal(TimeSpan.FromMinutes(35), requiredDuration);
 
             payload.PostProcess.Enabled = true;
             Assert.False(configuration.HasSufficientLockRenewalDuration(payload, out requiredDuration));
-            Assert.Equal(TimeSpan.FromMinutes(60), requiredDuration);
+            Assert.Equal(TimeSpan.FromMinutes(65), requiredDuration);
 
             payload.PostProcess = null;
             payload.Retries = -1;
             Assert.True(configuration.HasSufficientLockRenewalDuration(payload, out requiredDuration));
-            Assert.Equal(TimeSpan.FromMinutes(10), requiredDuration);
+            Assert.Equal(TimeSpan.FromMinutes(15), requiredDuration);
         }
 
         [Fact]
@@ -215,8 +223,11 @@ namespace Microsoft.Crank.IntegrationTests
             var configuration = WorkerConfiguration.Create(null, null, null, _ => null);
             var payload = new JobPayload
             {
-                Timeout = TimeSpan.MaxValue,
-                Retries = 1
+                Timeout = TimeSpan.FromTicks(
+                    TimeSpan.MaxValue.Ticks -
+                    WorkerConfiguration.MessageLockRenewalSafetyMargin.Ticks +
+                    1),
+                Retries = 0
             };
 
             Assert.False(configuration.HasSufficientLockRenewalDuration(payload, out var requiredDuration));

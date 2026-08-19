@@ -14,6 +14,7 @@ namespace Microsoft.Crank.AzureDevOpsWorker
         internal const string MaxAutoLockRenewalDurationEnvironmentVariable = "CRANK_AZDO_MAX_LOCK_RENEWAL_DURATION";
         internal static readonly TimeSpan DefaultPostProcessTimeout = TimeSpan.FromMinutes(10);
         internal static readonly TimeSpan DefaultMaxAutoLockRenewalDuration = TimeSpan.FromDays(1);
+        internal static readonly TimeSpan MessageLockRenewalSafetyMargin = TimeSpan.FromMinutes(5);
 
         private WorkerConfiguration(
             string postProcessExecutablePath,
@@ -79,7 +80,9 @@ namespace Microsoft.Crank.AzureDevOpsWorker
             try
             {
                 var attemptDurationTicks = checked(jobTimeoutTicks + postProcessTimeoutTicks);
-                var requiredDurationTicks = checked(attemptDurationTicks * attempts);
+                var attemptsDurationTicks = checked(attemptDurationTicks * attempts);
+                var requiredDurationTicks = checked(
+                    attemptsDurationTicks + MessageLockRenewalSafetyMargin.Ticks);
                 requiredDuration = TimeSpan.FromTicks(requiredDurationTicks);
             }
             catch (OverflowException)

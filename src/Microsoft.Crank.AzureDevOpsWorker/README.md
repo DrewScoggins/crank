@@ -41,13 +41,15 @@ as:
 
 ```text
 (retries + 1) * (job timeout + enabled post-process timeout)
+    + 5-minute per-message safety margin
 ```
 
 An absent or disabled post-process contributes no post-process timeout, and a
-negative retry count is treated as zero. If the configured lock renewal duration
-is less than the calculated duration, the worker fails and completes the task
-without starting Crank. This prevents message lock expiry from redelivering and
-duplicating a long-running job.
+negative retry count is treated as zero. The fixed safety margin covers worker
+startup, log forwarding, attempt cleanup, and message settlement. If the
+configured lock renewal duration is less than the calculated duration, the
+worker fails and completes the task without starting Crank. This prevents
+message lock expiry from redelivering and duplicating a long-running job.
 
 ### Payload contract
 
